@@ -1,0 +1,411 @@
+---
+title: "Cleaning Up a Time Series | UNHCR Refugees Package"
+author: "Joe Simeone"
+format: 
+  html:
+    embed-resources: true
+    code-fold: show
+editor: source
+
+---
+
+```{r}
+#| label: "Preliminaries"
+#| include: false
+
+library(tidyverse)
+library(refugees)
+library(ggtext)
+library(rcartocolor)
+library(extrafont)
+
+
+source(here::here("script", "syria_plotting_scribbles.R"))
+
+
+
+
+```
+
+
+# Where we're headed 
+
+Today, I thought I'd talk a little bit about cleaning up graphs for presentation
+and sharing with `ggplot2`. Everyone here has probably seen something like this before:
+
+```{r}
+#| label: "No changes graph"
+#| echo: false
+#| fig-cap: "*The default themes and colors that everyone knows and loves*"
+
+ggplot(syr_viz_dat, aes(year, totals, color = coa_tweaked)) +
+  geom_line()
+
+
+```
+
+
+It looks, well, it probably doesn't look great. As is, it tells us... something. We've got some numbers on the y axis, 2 years on the x axis, and some countries in the legend. Otherwise, this could truly be about anything. And this is before we get to the aesthetics. If we were to present this output to someone, say a boss or a conference or students, they may not give our work the attention it deserves. More, they likely won't find us as credible as they otherwise could if we spent a little more time on how the graph itself *looked*.
+
+Happily, `GGplot2` gives users a ton of flexibility and functionality for producing prettier visuals. I'll try to break a graph (in this case a time series) into the elements that we'll want to improve:
+
+1. **Lines**
+2. **Scales and Axes**
+3. **Labels & Legends**
+4. **Colors**
+5. **Theming**
+6. **Maybe fonts**
+
+`Ggplot2` works by combining these elements around the `+` symbol, so we'll code these up bit by bit to build something that looks a little nicer.
+
+
+::: {.callout-note}
+People spend their whole careers thinking through data visualization, and I'm just a guy, so take this all in the spirit of me expressing preferences and showing some things that I find useful. 
+:::
+
+# Visuals for Exploration vs Presentation
+
+Importantly, producing presentation or publication level takes **effort**, and some times a lot of effort. Because there's never enough time and we're all busy people, we want to make sure that we're spending that effort appropriately. 
+
+We visualize data for 2 broad purposes:
+1. For exploration and our own understanding
+2. For presentation and other's understanding
+
+In the exploration phase, we should really only care about aesthetics insofar as they allow us to learn things that we might otherwise miss. This could be applying new color schemes to better see some aspect of our data, tweaking large number formatting something more manageable, or titling things to assist our recall. Here, we care much more about **speed** and **thoroughness**.
+
+It's when we find something that we want to share that these aesthetic tools and tweaks become most important.
+
+# Workflow & Getting Help
+
+Visualization is something that requires constant trial and error. We code something, assess how our changes worked, and either accept them or go back to the drawing board and try again. The results here (hopefully) stack into a clear, linear process, but developing this required frequent tinkering and re-tinkering. This is mostly just to say that if you're feeling stuck or frustrated or like things are taking forever, that is often a normal part of the process. 
+
+Moreover, because `ggplot` offers so much functionality, it is easy to forget stuff. This is true even though the syntax itself is so elegant. I've tried to flag a few useful resources for learning more about the package, but in my experience, it is often helpful to just straight-up call for help with `?`. The documentation is great. 
+
+# The Data | United Nations High Council on Refugees (UNHCR)
+
+UNHCR makes several of their datasets on forced migration available in the [`refugees package`](https://www.unhcr.org/refugee-statistics/insights/explainers/refugees-r-package.html). Today, we'll use the `flows` dataset to look into the Syrian refugee crisis in the aftermath of their civil war. Specifically, we'll try to visualize where they most often sought refuge.
+
+```{r}
+#| label: "See flows data"
+#| echo: true
+#| collapse: true
+
+glimpse(refugees::flows)
+```
+
+
+# Tidying 
+
+Because we're interested most in visuals, I won't spend a ton of time on the data cleaning process, I'll just post what I did with a few notes. 
+```{r}
+#| label: "Cleaning up the data"
+#| echo: true
+
+## Narrow Data to Syria country of origin
+syrian_flows <- 
+  refugees::flows %>% 
+  filter(coo_name == "Syrian Arab Rep." & 
+           year %in% c(2011:2024)
+         )
+
+## Find top 5 countries of asylum --> Pull as vector for filtering
+top5_coa <- 
+  syrian_flows %>% 
+  summarise(sum_asy = sum(asylum_seekers),
+            sum_ref = sum(refugees),
+            .by = c(year, coa_name)) %>% 
+  mutate(totals = sum_asy + sum_ref) %>% 
+  arrange(desc(totals)) %>% 
+  distinct(coa_name) %>% 
+  slice_head(n = 5) %>% 
+  pull()
+
+## Filter data, tweak a few of the variables  
+syr_viz_dat <- 
+  syrian_flows %>% 
+  mutate(
+    coa_tweaked = 
+      if_else(!coa_name %in% top5_coa,
+              "Other", coa_name)) %>% 
+  group_by(year, coa_tweaked, .drop = FALSE) %>% 
+  summarise(sum_asy = sum(asylum_seekers, na.rm = TRUE),
+            sum_ref = sum(refugees, na.rm = TRUE),
+            .groups = "drop"
+            ) %>% 
+  mutate(
+    across(c(sum_asy, sum_ref), 
+           ~ if_else(is.na(.x), 0, .x)
+           )
+  ) %>% 
+  mutate(totals = 
+           sum_asy + sum_ref) %>% 
+  ungroup()
+
+
+## Code for the initial graph 
+og_plot <-
+  ggplot(syr_viz_dat, 
+         aes(year, totals, color = coa_tweaked)) +
+  geom_line()
+
+
+```
+
+Let's get after it. 
+
+# Improving Line Asthetics 
+
+## Fixing Turkey
+So, one thing that **annoys** me about this graph is that Turkey ends prematurely. Maybe there's an argument that this actually better because it shows a dramatic change (not allowing asylees any longer), but I like the idea of 0'ing it out because my preference is that our data should be uniform. This requires a change to our **data**, rather than our ggplot arguments, although my method is admittedly janky. 
+
+```{r}
+#| label: "Add turkey 0s"
+#| echo: true
+turkey_helper <- tribble(~year, ~coa_tweaked, ~sum_asy, ~sum_ref, ~totals,
+                         2019, "Türkiye", 0, 0, 0, 
+                         2020, "Türkiye", 0, 0, 0, 
+                         2021, "Türkiye", 0, 0, 0, 
+                         2022, "Türkiye", 0, 0, 0, 
+                         2023, "Türkiye", 0, 0, 0, 
+                         2024, "Türkiye", 0, 0, 0)
+
+## Appinge data and look
+syr_viz_dat <-
+  syr_viz_dat %>%
+  rbind(turkey_helper) 
+
+plot_bones <- 
+ggplot(syr_viz_dat, 
+       aes(year, 
+           totals,
+           color = coa_tweaked, 
+           fill = coa_tweaked)
+       ) +
+  geom_line()
+
+plot_bones
+```
+
+## Sharpening with linewidth
+
+Cool, now I feel like my lines could look a little sharper. This is maybe just a me thing, but this is my notebook so bare with me lol. 
+
+```{r}
+plot_bones <- 
+ggplot(syr_viz_dat, 
+       aes(year, 
+           totals,
+           color = coa_tweaked, 
+           fill = coa_tweaked)
+       ) +
+  geom_line(linewidth = .7)
+
+plot_bones
+```
+We control this in the `geom_line` argument. I usually use .7 or .75, but this will depend on use case, coloring etc. You can see that it makes things a little clearer. This is also where we could control the
+line style, shading etc. I'm not yet looking to highlight anything particular, and I don't feel like a different line style is necessary because all of our entities (countries of asylum) are the same.  
+
+## Who doesn't love dots 
+I also typically added dots to the different data points. This is just something I find helpful when the graph is picture rather than another format. 
+
+```{r}
+#| label: "dots on dots"
+#| echo: true
+
+plot_bones <- 
+ggplot(syr_viz_dat, 
+       aes(year, 
+           totals,
+           color = coa_tweaked, 
+           fill = coa_tweaked)
+       ) +
+  geom_line(linewidth = .7) +
+  geom_point()
+
+plot_bones
+```
+
+
+# Scales and Axes
+
+## X Axis | The year values are bad... 
+
+The first thing we can improve about our graphs are the X an Y axes. On the X axis we're only showing 2 years even we have years from 2011 - 2024. This is happening because our year variable is numeric, and ggplot is making a choice based on that variable type. Let's deal with that:
+```{r}
+#| label: "Lubridate this baby"
+#| echo: true
+
+## Add a date variable to coerce visual
+syr_viz_dat <-
+  syr_viz_dat %>%
+  mutate(year_tweaked = make_date(year, 01, 01))
+
+
+plot_imp_x_axis <-
+ggplot(syr_viz_dat, 
+       aes(year_tweaked, 
+           totals,
+           color = coa_tweaked, 
+           fill = coa_tweaked)
+       ) +
+  geom_line(linewidth = .75) +
+  geom_point() +
+  scale_x_date(labels = scales::date_format("%Y"),
+               breaks = seq(min(syr_viz_dat$year_tweaked), 
+               max(syr_viz_dat$year_tweaked), 
+               by = "2 year")
+)
+
+plot_imp_x_axis
+
+
+```
+Unfortunately, time series are a bit of a special case in that they routinely require us to interact with date formatted variables, which is a circle of hell on earth. 
+
+Here, we use `scale_x_date` to control the labeling and sequencing of a variable called year_tweaked, which is variable formatted as a date value. `Labels` controls labeling. `scales::date_format` let's us pick the year value from our new date variable. `Breaks` control what values appear on the axis. We could tweak any of these to get a different result.
+
+
+## Y Axis | Our numbers could like nicer
+
+I'm actually happy with the default scale here, so we won't need to mess with that. On the other hand, the numbers could be a little more friendly to the eye: 
+
+```{r}
+
+plot_better_x_y <- 
+  plot_imp_x_axis +
+  scale_y_continuous(labels = scales::comma)
+
+plot_better_x_y
+
+
+
+```
+
+There are a bajillion scales arguments. Commas works well here, but we could rescale in a number of different ways depending upon our needs. 
+
+# Coloring 
+
+Another way to improve our plot is move away from R's default color schemes. I'm going to use a palette from the `rcartocolor` package, but there are lots and lots and lots. Because we've supplied **coa_tweaked** to the `aes()` statement, `ggplot` will map colors for both points and lines to those categories. 
+
+```{r}
+#| label: "Some Colors"
+#| echo: true
+
+color_options <- 
+rcartocolor::carto_pal(n = 12, "Safe")
+
+# "#88CCEE" "#CC6677" "#DDCC77" "#117733" "#332288" "#AA4499" "#44AA99" "#999933" "#882255" "#661100" "#6699CC" "#888888"
+
+our_colors <- 
+  c("#661100","#332288", "#999933", "#882255",  "#117733", "#AA4499")
+
+plot_w_colors <- 
+  plot_better_x_y + 
+  scale_color_manual(values = our_colors)
+
+plot_w_colors
+
+```
+
+Here, I've also shown a pretty handy way to manually specify a set of colors for our lines. Putting the colors that we want into a named vector gives us more control over which specific parts of the color palette are being used. 
+
+# Legends & Labels
+
+
+One useful thing about being able to stack ggplot arguments around `+` is that we can save elements to different R objects and use them up or down stream in our code. This becomes especially useful when we need to make several similar plots that show slightly different things. We're not really doing that here, but just file it away.
+
+Here, I'm using a package called `ggtext` to work create markdown elements in my graph like so: 
+```{r}
+#| label: "Make our labels"
+#| echo: true
+#| fig-width: 10
+#| fig-height: 6
+
+## Coloring our subtitle string
+subtitle_str <- "*Refugees Flows in the Aftermath of the Syrian Civil War | Top Receiving Countries* <br> 
+       **Türkiye**, **Jordan**, **Lebanon**, **Iraq**, **Germany**, **Everyone Else**"
+
+countries <- c("Germany", "Iraq", "Jordan", "Lebanon", "Everyone Else", "Türkiye")
+
+# Apply colors
+colored_countries <- paste0(
+  "<span style='color:", our_colors, "'><b>", countries, "</b></span>"
+)
+
+# Now reconstruct the subtitle
+subtitle_str_colored <- paste0(
+  "*Refugees Flows in the Aftermath of the Syrian Civil War | Top Receiving Countries* <br> ",
+  paste(colored_countries, collapse = ", ")
+)
+
+
+syr_labs <-
+  labs(title = "With the Exception of **Germany**, countries of closest proximity to Syria processed the most Syrian Refugees",
+       subtitle = subtitle_str_colored,
+       y = "Flows (Counts)",
+       x = "",
+       caption = 
+       "*1. Annual counts derived from UNHCR's Refugee Package.* <br>
+       *2. For techincal details, see package documentation.* <br>
+       *3. Plot Made By Joe Simeone | Mistakes are his and his alone :).*")
+
+
+ggtext_theme <-
+  theme(plot.title = element_markdown(hjust = .5,
+                                      size = 15),
+        plot.subtitle = element_markdown(hjust = .5,
+                                         size = 13),
+        plot.caption = element_markdown(hjust= 0),
+        axis.text.y = element_markdown(),
+        legend.position = "none")
+
+plot_w_labs <- 
+  plot_w_colors + 
+  syr_labs + 
+  ggtext_theme
+
+plot_w_labs
+
+```
+
+When we render, the asterisks and br tags convert to help ggplot interpret our code and make the changes. I've also removed the x axis label because it's redundant. Also, also, I've removed the default legend because I am the world's foremost default legend hater.
+
+# Theming 
+
+Ok, so we've gotten almost all of the defaults out of the paint. Now we need to style the graph itself. We've already gotten a taste of `theme` to add markdown elements to our labels. We can also use it to tweak additional graph aesthetics. 
+
+Like `labs`, you've seen now that we can store our theme in an object and pass it to ggplot around `+`. This again is super useful if we have multiple plots, but we'll (maybe) get to that later. For the moment
+
+```{r}
+#| label: "Finished theming"
+#| echo: true
+#| fig-width: 10
+#| fig-height: 6
+
+## Load a font from google || Not totally sure why showtext_auto works, but it does lol 
+sysfonts::font_add_google(name = "Source Sans Pro", family = "inter")
+showtext::showtext_auto(enable = TRUE)
+
+theme_fin <-
+  ggtext_theme +
+  theme(axis.line = element_line(color = "black"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(color = "black",
+                                          linetype = "dashed",
+                                          linewidth = .1),
+       panel.background = element_rect(fill = 'snow'),
+       plot.background = element_rect(fill = "snow"),
+       text = element_text(family = "inter"))
+
+
+plot_w_theme <- 
+  plot_w_colors + 
+  theme_fin + 
+  syr_labs
+
+plot_w_theme
+```
+
+
+
