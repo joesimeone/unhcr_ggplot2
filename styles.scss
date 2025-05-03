@@ -1,0 +1,21 @@
+/*-- scss:defaults --*/
+
+
+$font-family-body: 'Inter', sans-serif;
+$font-family-heading: 'Montserrat', sans-serif;
+
+$headings-color: "#00437b";
+$toc-color: "#005DAD";
+
+
+// Example SCSS variable
+$heading-number-color: #00437b; 
+
+h1 .header-section-number,
+h2 .header-section-number,
+h3 .header-section-number,
+h4 .header-section-number,
+h5 .header-section-number,
+h6 .header-section-number {
+  color: $heading-number-color;
+}

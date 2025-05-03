@@ -5,6 +5,12 @@ format:
   html:
     embed-resources: true
     code-fold: show
+    toc: true
+    number-sections: true
+    smooth-scroll: true 
+    mainfont: inter
+    theme: 
+      styles.scss
 editor: source
 
 ---
@@ -426,6 +432,6 @@ plot_w_theme <-
 
 plot_w_theme
 ```
-`theme` allows users to change basically any part of the graph. There are too many options to note, but the arguments typically follow the element. convention you see on the left hand side, followed by one of `element_rect()`, `element_line()`, or `element_text`.
+`theme` allows users to change basically any part of the graph. There are too many options to note, but the arguments typically follow the element. convention you see on the left hand side, followed by one of `element_rect()`, `element_line()`, or `element_text()`.
 
 And that's it! Or it least that's the best I could do with the time that I had. What else would you change? 
